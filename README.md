@@ -66,24 +66,61 @@ In our controlled **KRAS** experiment we start from a reference sequence and del
 ---
 
 ## 🔄 Project Workflow
-
-```mermaid
-flowchart LR
-    A[🧬 Genomic Input<br/>KRAS reference + sample] --> B[🔢 Encode<br/>A,C,G,T → 0..3]
-    B --> C[📡 Stream over TCP<br/>send_dna.py]
-    C --> D[⚙️ Deterministic Kernel<br/>genova_pi.c<br/>pinned to Core 2]
-    D --> E[📊 PMU Counters<br/>perf_event_open]
-    E --> F[🧮 Hardware Feature Vector<br/>CM · BM · INS · CYC · IPC · per-kb rates]
-    F --> G{⚖️ Compare with<br/>Reference Baseline}
-    G -->|Deviation| H[🚩 Flag for further<br/>investigation]
-    G -->|Within baseline| I[✅ Consistent with<br/>reference]
-
-    style A fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
-    style D fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
-    style E fill:#fff8e1,stroke:#f9a825,stroke-width:2px
-    style F fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px
-    style H fill:#ffebee,stroke:#c62828,stroke-width:2px
-    style I fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+ 
+```text
++---------------------------+
+|  1. GENOMIC INPUT         |
+|  KRAS reference + sample  |
++-------------+-------------+
+              |
+              v
++---------------------------+
+|  2. ENCODE                |
+|  A,C,G,T  ->  0,1,2,3     |
++-------------+-------------+
+              |
+              v
++---------------------------+
+|  3. STREAM OVER TCP       |
+|  send_dna.py -> port 9999 |
++-------------+-------------+
+              |
+              v
++---------------------------+
+|  4. DETERMINISTIC KERNEL  |
+|  genova_pi.c (C)          |
+|  Raspberry Pi, core 2     |
++-------------+-------------+
+              |
+              v
++---------------------------+
+|  5. PMU MEASUREMENT       |
+|  cache misses             |
+|  branch mispredictions    |
+|  instructions, cycles     |
++-------------+-------------+
+              |
+              v
++---------------------------+
+|  6. HARDWARE FEATURE      |
+|  VECTOR                   |
+|  IPC, cm_per_kb,          |
+|  bm_per_kb, mismatch %    |
++-------------+-------------+
+              |
+              v
++---------------------------+
+|  7. COMPARE WITH          |
+|  REFERENCE BASELINE       |
++------+------------+-------+
+       |            |
+       v            v
++------------+  +-----------------+
+| Deviation  |  | Within baseline |
+| FLAG FOR   |  | CONSISTENT WITH |
+| FURTHER    |  | REFERENCE       |
+| INVESTIGATE|  |                 |
++------------+  +-----------------+
 ```
 
 ### Step-by-step
@@ -100,66 +137,106 @@ flowchart LR
 ---
 
 ## 🏗️ System Architecture
-
-```mermaid
-flowchart TB
-    subgraph HOST["💻 Host Machine (Sender)"]
-        direction TB
-        H1[kras_ref.fasta]
-        H2[make_kras_mut.py<br/>make_classes.py]
-        H3[(.bin datasets<br/>reference / mut0.0001 … mut0.1<br/>low / medium / high)]
-        H4[send_dna.py<br/>chunked TCP client]
-        H1 --> H2 --> H3 --> H4
-    end
-
-    subgraph NET["🌐 Network"]
-        N1[TCP :9999<br/>4-byte LE length header<br/>+ ref chunk + sample chunk]
-    end
-
-    subgraph PI["🍓 Raspberry Pi (Edge Node)"]
-        direction TB
-        subgraph USER["User Space"]
-            P1[Socket Server<br/>recv loop]
-            P2[Aligned Buffers<br/>ref_buf · sam_buf<br/>64-byte aligned, 1 MiB]
-            P3[⚙️ process_pairwise&#40;&#41;<br/>deterministic kernel]
-            P4[chaos&#40;&#41;<br/>branch + memory stressor<br/>16 MiB buffer]
-            P1 --> P2 --> P3
-            P3 -- mismatch --> P4
-        end
-        subgraph KERNEL["Kernel / Hardware"]
-            K1[perf_event_open syscall]
-            K2[🔬 ARM PMU<br/>cache-misses · branch-misses<br/>instructions · cycles]
-        end
-        P3 -.executes on.-> K2
-        K2 --> K1
-        K1 --> P5[Feature Vector<br/>+ ground-truth mismatch %]
-    end
-
-    OUT[📄 Result line<br/>bases · mismatch · cm · bm · ic · cy · ipc<br/>cm_per_kb · bm_per_kb]
-
-    H4 ==> N1 ==> P1
-    P5 ==> OUT
-
-    style HOST fill:#e8f5e9,stroke:#2e7d32
-    style PI fill:#fce4ec,stroke:#ad1457
-    style NET fill:#e3f2fd,stroke:#1565c0
+ 
+```text
++====================================================================+
+|  HOST MACHINE  (Sender)                                            |
+|                                                                    |
+|   kras_ref.fasta                                                   |
+|        |                                                           |
+|        v                                                           |
+|   make_kras_mut.py / make_classes.py                               |
+|        |                                                           |
+|        v                                                           |
+|   .bin datasets                                                    |
+|   (reference, mut0.0001 ... mut0.1, low / medium / high)           |
+|        |                                                           |
+|        v                                                           |
+|   send_dna.py   (chunked TCP client)                               |
++========================================+===========================+
+                                         |
+                                         |  TCP port 9999
+                                         |  [4-byte length][ref chunk][sample chunk]
+                                         v
++====================================================================+
+|  RASPBERRY PI  (Edge Node)                                         |
+|                                                                    |
+|  +--------------------- USER SPACE ----------------------------+   |
+|  |                                                             |   |
+|  |   Socket server (recv loop)                                 |   |
+|  |        |                                                    |   |
+|  |        v                                                    |   |
+|  |   Aligned buffers: ref_buf, sam_buf (64-byte, 1 MiB)        |   |
+|  |        |                                                    |   |
+|  |        v                                                    |   |
+|  |   process_pairwise()  <-- deterministic kernel              |   |
+|  |        |                                                    |   |
+|  |        |  on every mismatch                                 |   |
+|  |        v                                                    |   |
+|  |   chaos()  (64 branches + 8 memory reads, 16 MiB buffer)    |   |
+|  |                                                             |   |
+|  +-------------------------------------------------------------+   |
+|                              |                                     |
+|                              v                                     |
+|  +----------------- KERNEL / HARDWARE -------------------------+   |
+|  |                                                             |   |
+|  |   ARM PMU counters                                          |   |
+|  |   cache-misses | branch-misses | instructions | cycles      |   |
+|  |        |                                                    |   |
+|  |        v                                                    |   |
+|  |   perf_event_open syscall                                   |   |
+|  |                                                             |   |
+|  +-------------------------------------------------------------+   |
+|                              |                                     |
+|                              v                                     |
+|   Feature vector + software ground-truth mismatch %                |
++========================================+===========================+
+                                         |
+                                         v
+        OUTPUT LINE:
+        bases, mismatch, cm, bm, ic, cy, ipc, cm_per_kb, bm_per_kb
 ```
-
+ 
 ### Layered view
-
+ 
+```text
++--------------------------------------------------------------+
+|  Application | Genomic comparator + feature extraction       |
++--------------------------------------------------------------+
+|  Workload    | Controlled deterministic C kernel             |
++--------------------------------------------------------------+
+|  OS          | Linux, perf_event_open, CPU affinity          |
++--------------------------------------------------------------+
+|  Hardware    | ARM CPU core 2, caches, branch predictor, PMU |
++--------------------------------------------------------------+
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  Application   │ Genomic comparator + feature extraction     │
-├──────────────────────────────────────────────────────────────┤
-│  Workload      │ Controlled deterministic C kernel           │
-├──────────────────────────────────────────────────────────────┤
-│  OS            │ Linux · perf_event_open · CPU affinity      │
-├──────────────────────────────────────────────────────────────┤
-│  Hardware      │ ARM CPU core 2 · L1/L2/L3 caches · branch   │
-│                │ predictor · PMU counters                    │
-└──────────────────────────────────────────────────────────────┘
+ 
+---
+ 
+## 📁 Project Architecture (Repository)
+ 
 ```
-
+genova/
+├── genova_pi.c            # ⚙️  Deterministic kernel + PMU telemetry (runs on Pi)
+├── send_dna.py            # 📡  Sender: streams ref/sample pairs over TCP
+├── make_kras_mut.py       # 🧪  Generates KRAS mutation-rate datasets
+├── make_classes.py        # 🧪  Generates low / medium / high classes
+├── kras_ref.fasta         # 🧬  KRAS reference sequence (FASTA)
+├── kras_reference.bin     # 🧬  Encoded reference (0..3 per base)
+│
+├── kras_mut0.0001.bin     # Mutation sweep (percent values)
+├── kras_mut0.001.bin
+├── kras_mut0.005.bin
+├── kras_mut0.01.bin
+├── kras_mut0.05.bin
+├── kras_mut0.1.bin
+│
+├── kras_low.bin           # Class datasets
+├── kras_medium.bin
+├── kras_high.bin
+└── README.md
+```
+ 
 ---
 
 ## 📁 Project Architecture (Repository)
