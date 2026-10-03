@@ -102,7 +102,8 @@ In our controlled **KRAS** experiment we start from a reference sequence and del
 ```text
 +---------------------------+
 |  1. GENOMIC INPUT         |
-|  KRAS reference + sample  |
+|  KRAS reference/TP53      |
+|  REFERENCE                |
 +-------------+-------------+
               |
               v
@@ -135,9 +136,9 @@ In our controlled **KRAS** experiment we start from a reference sequence and del
               v
 +---------------------------+
 |  6. HARDWARE FEATURE      |
-|  VECTOR                   |
-|  IPC, cm_per_kb,          |
-|  bm_per_kb, mismatch %    |
+| bm_per_kb, Cluster %      |
+| detection with the help of|
+| Modality function         |
 +-------------+-------------+
               |
               v
@@ -156,7 +157,7 @@ In our controlled **KRAS** experiment we start from a reference sequence and del
 ```
 
 ### Step-by-step
-
+**VERY VERY IMPORTANT: CORE ISOLATION, CLOCK SPEED FIXATION, THERMAL THROTTLING, BUFFER BOTTLENECK MANAGEMENT**
 | # | Stage | What happens |
 |---|-------|--------------|
 | 1 | **Prepare** | Build reference and sample sequences (`makekras.py`, `maketp53.py`, `make_classes.py`) and save as `.bin` files |
@@ -164,7 +165,7 @@ In our controlled **KRAS** experiment we start from a reference sequence and del
 | 3 | **Process** | `genova_pi.c` runs a pairwise reference-vs-sample comparator on core 2 |
 | 4 | **Measure** | PMU counters are enabled for the whole session and read at the end |
 | 5 | **Featurize** | Raw counts become normalized features (IPC, misses per 1000 bases, mismatch %) |
-| 6 | **Compare** | Feature vector is compared against the baseline to get a deviation signature |
+| 6 | **Compare** | Feature Factor is compared against the baseline to get a deviation signature  after being increased by the clustering % multiplied |
 
 ---
 
@@ -221,12 +222,12 @@ In our controlled **KRAS** experiment we start from a reference sequence and del
 |  +-------------------------------------------------------------+   |
 |                              |                                     |
 |                              v                                     |
-|   Feature vector + software ground-truth mismatch %                |
+|   bm_per_kb incresed by clustering %                               |
 +========================================+===========================+
                                          |
                                          v
         OUTPUT LINE:
-        bases, mismatch, cm, bm, ic, cy, ipc, cm_per_kb, bm_per_kb
+        avg bm_per_kb, Modality, clustering % , web dashboard
 ```
 
 ### Layered view
