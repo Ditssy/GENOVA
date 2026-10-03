@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>GENOVA Screening Result</title>
+<style>
+  :root {
+    --bg: #000000;
+    --bg-panel: #0a0a0a;
+    --text-primary: #e0e0e0;
+    --text-muted: #888888;
+    /* Colors for the spectrum */
+    --green: #008000;
+    --lime: #32CD32;
+    --yellow: #FFFF00;
+    --amber: #FFBF00;
+    --orange: #FFA500;
+    --red-orange: #FF4500;
+    --red: #FF0000;
+    --deep-red: #8B0000;
+    --zone-width: 12.5%; /* 100% / 8 */
+    --font-sans: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; background:var(--bg); color:var(--text-primary); font-family:var(--font-sans); }
+  .page { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:100vh; padding:20px; text-align:center; }
+  .brand { font-size:2.8rem; font-weight:700; letter-spacing:-0.5px; margin-bottom:4px; background:linear-gradient(to right,#00bcd4,#009688); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+  .subtitle { font-size:1.2rem; font-weight:500; color:var(--text-muted); margin-bottom:2px; }
+  .title { font-size:1.8rem; font-weight:600; letter-spacing:-0.3px; margin-bottom:4px; }
+  .gauge-wrapper {
+    position:relative;
+    width:100%;
+    max-width:900px;
+    height:60px;
+    margin:20px auto;
+  }
+  .gauge {
+    position:absolute;
+    inset:0;
+    border-radius:8px;
+    overflow:hidden;
+    background:linear-gradient(
+      to right,
+      var(--green) 0%,
+      var(--lime) var(--zone-width),
+      var(--yellow) calc(2*var(--zone-width)),
+      var(--amber) calc(3*var(--zone-width)),
+      var(--orange) calc(4*var(--zone-width)),
+      var(--red-orange) calc(5*var(--zone-width)),
+      var(--red) calc(6*var(--zone-width)),
+      var(--deep-red) calc(7*var(--zone-width)),
+      var(--deep-red) 100%
+    );
+    box-shadow:0 0 0 1px rgba(255,255,255,0.06), inset 0 0 0 1px rgba(255,255,255,0.02);
+  }
+  /* Labels above the gauge */
+  .labels {
+    position:absolute;
+    top:-28px;
+    left:0;
+    width:100%;
+    display:flex;
+    justify-content:space-between;
+    font-size:0.85rem;
+    font-weight:600;
+    color:var(--text-muted);
+    text-transform:uppercase;
+    letter-spacing:0.4px;
+  }
+  .labels span { flex:0 0 var(--zone-width); text-align:center; }
+  /* Pointer */
+  .pointer {
+    position:absolute;
+    left:0; /* will be set by JS */
+    top:0;
+    width:2px;
+    height:100%;
+    background:var(--text-primary);
+    transform:translateX(-50%);
+    box-shadow:0 0 8px 2px rgba(255,255,255,0.6);
+  }
+  /* Pointer base (triangle) */
+  .pointer::after {
+    content:"";
+    position:absolute;
+    left:-4px;
+    bottom:-8px;
+    width:0; height:0;
+    border-left:6px solid transparent;
+    border-right:6px solid transparent;
+    border-top:8px solid var(--text-primary);
+  }
+  /* Result display */
+  .result {
+    margin-top:20px;
+  }
+  .classification-value {
+    font-size:2.2rem;
+    font-weight:800;
+    letter-spacing:-0.3px;
+    text-shadow:0 0 8px rgba(255,255,255,0.3);
+  }
+
+  /* ---------- Cluster Percentage donut graph ---------- */
+  .graph-section {
+    margin-top: 36px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .graph-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 14px;
+  }
+  .donut {
+    width: 200px;
+    height: 200px;
+  }
+  .donut-bg {
+    fill: none;
+    stroke: #161616;
+    stroke-width: 12;
+  }
+  .donut-fg {
+    fill: none;
+    stroke: url(#donutGradient);
+    stroke-width: 12;
+    stroke-linecap: round;
+    transform: rotate(-90deg);
+    transform-origin: 100px 100px;
+    transition: stroke-dasharray 0.9s ease;
+    filter: drop-shadow(0 0 6px rgba(0,188,212,0.45));
+  }
+  .donut-text {
+    fill: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 1.9rem;
+    font-weight: 800;
+    text-anchor: middle;
+    text-shadow: 0 0 8px rgba(255,255,255,0.3);
+  }
+  .donut-sub {
+    fill: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.6px;
+    text-anchor: middle;
+    text-transform: uppercase;
+  }
+
+  /* Responsive */
+  @media (max-width:600px) {
+    .brand { font-size:2.2rem; }
+    .title { font-size:1.5rem; }
+    .gauge-wrapper { height:45px; }
+    .labels { font-size:0.7rem; top:-22px; }
+    .pointer { width:1.5px; }
+    .classification-value { font-size:1.8rem; }
+    .donut { width: 160px; height: 160px; }
+    .donut-text { font-size: 1.5rem; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="brand">GENOVA</div>
+  <div class="subtitle">CPU-Based DNA Screening</div>
+  <div class="title">SCREENING RESULT</div>
+  <div class="subtitle">Computational Deviation</div>
+
+  <div class="gauge-wrapper">
+    <div class="gauge"></div>
+    <div class="labels">
+      <span>Healthy</span>
+      <span>Level 1</span>
+      <span>Level 2</span>
+      <span>Level 3</span>
+      <span>Level 4</span>
+      <span>Level 5</span>
+      <span>Level 6</span>
+      <span>Level 7</span>
+    </div>
+    <div class="pointer"></div>
+  </div>
+
+  <div class="result">
+    <div class="classification-value" data-cluster="{{CLUSTER_PERCENT}}">{{CLASSIFICATION}}</div>
+  </div>
+
+  <!-- Cluster Percentage graph -->
+  <div class="graph-section">
+    <div class="graph-title">Cluster Percentage</div>
+    <svg class="donut" viewBox="0 0 200 200">
+      <defs>
+        <linearGradient id="donutGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#00bcd4"/>
+          <stop offset="100%" stop-color="#009688"/>
+        </linearGradient>
+      </defs>
+      <circle class="donut-bg" cx="100" cy="100" r="80"/>
+      <circle class="donut-fg" cx="100" cy="100" r="80" id="clusterArc"/>
+      <text class="donut-text" x="100" y="106" id="clusterText">0 %</text>
+      <text class="donut-sub"  x="100" y="132">CLUSTER</text>
+    </svg>
+  </div>
+</div>
+
+<script>
+  // Map classification string to index (0-7)
+  const CLASSIFICATION_MAP = {
+    'Healthy': 0,
+    'Level 1': 1,
+    'Level 2': 2,
+    'Level 3': 3,
+    'Level 4': 4,
+    'Level 5': 5,
+    'Level 6': 6,
+    'Level 7': 7
+  };
+
+  // Get the classification value from the placeholder (server replaced it)
+  const classificationText = document.querySelector('.classification-value').textContent.trim();
+  const index = CLASSIFICATION_MAP[classificationText] !== undefined
+              ? CLASSIFICATION_MAP[classificationText]
+              : 0;
+
+  // Position the pointer at the centre of the matching zone
+  const pointer = document.querySelector('.pointer');
+  pointer.style.left = `calc((${index} + 0.5) * 12.5%)`;
+
+  // ----- Cluster Percentage donut -----
+  const clusterEl = document.querySelector('.classification-value');
+  let clusterPct = parseFloat(clusterEl.dataset.cluster);
+  if (isNaN(clusterPct)) clusterPct = 0;
+  if (clusterPct < 0) clusterPct = 0;
+  if (clusterPct > 100) clusterPct = 100;
+
+  const RADIUS = 80;
+  const CIRC = 2 * Math.PI * RADIUS;
+  const fraction = clusterPct / 100;
+
+  const arc = document.getElementById('clusterArc');
+  arc.style.strokeDasharray = `0 ${CIRC}`;   // start empty, then animate
+  requestAnimationFrame(() => {
+    arc.style.strokeDasharray = `${fraction * CIRC} ${CIRC}`;
+  });
+
+  document.getElementById('clusterText').textContent = clusterPct.toFixed(1) + ' %';
+</script>
+</body>
+</html>

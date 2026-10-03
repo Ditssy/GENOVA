@@ -1,0 +1,3 @@
+=== GENOVA V2 EXPERIMENT ===
+--- run 1 ---
+listening on 9999 [pairwise ref-vs-sample], LUT=262144 entries, pinned to core 2
