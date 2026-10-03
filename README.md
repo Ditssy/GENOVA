@@ -19,19 +19,20 @@
 ## 📌 Table of Contents
 
 1. [Motivation](#-motivation)
-2. [The Idea](#-the-idea)
-3. [Project Workflow](#-project-workflow)
-4. [System Architecture](#-system-architecture)
-5. [Project Architecture (Repository)](#-project-architecture-repository)
-6. [The Deterministic Kernel (`genova_pi.c`)](#-the-deterministic-kernel-genova_pic)
-7. [The DNA Sender (`send_dna.py`)](#-the-dna-sender-send_dnapy)
-8. [PMU Signature & Hardware Feature Vector](#-pmu-signature--hardware-feature-vector)
-9. [Wire Protocol](#-wire-protocol)
-10. [Quick Start](#-quick-start)
-11. [Experiment: Controlled KRAS Mutation Sweep](#-experiment-controlled-kras-mutation-sweep)
-12. [What GENOVA Is — and Is Not](#-what-genova-is--and-is-not)
-13. [Roadmap](#-roadmap)
-14. [Limitations & Honest Notes](#-limitations--honest-notes)
+2. [What Problem Does GENOVA Solve?](#-what-problem-does-genova-solve)
+3. [The Idea](#-the-idea)
+4. [Project Workflow](#-project-workflow)
+5. [System Architecture](#-system-architecture)
+6. [Project Architecture (Repository)](#-project-architecture-repository)
+7. [The Deterministic Kernel (`genova_pi.c`)](#-the-deterministic-kernel-genova_pic)
+8. [The DNA Sender (`send_dna.py`)](#-the-dna-sender-send_dnapy)
+9. [PMU Signature & Hardware Feature Vector](#-pmu-signature--hardware-feature-vector)
+10. [Wire Protocol](#-wire-protocol)
+11. [Quick Start](#-quick-start)
+12. [Experiment: Controlled Mutation Sweep (KRAS and TP53)](#-experiment-controlled-mutation-sweep-kras-and-tp53)
+13. [What GENOVA Is — and Is Not](#-what-genova-is--and-is-not)
+14. [Roadmap](#-roadmap)
+15. [Limitations & Honest Notes](#-limitations--honest-notes)
 
 ---
 
@@ -47,6 +48,38 @@ Genomic analysis today is computationally intensive and involves multiple stages
 
 ---
 
+## ❓ What Problem Does GENOVA Solve?
+
+### The problem
+
+1. **Early detection is a race against time.** Small cancer-associated genomic changes are easy to miss, and every extra stage of testing adds delay before an abnormality is investigated.
+2. **Genomic analysis is heavy.** It needs computationally intensive processing and several stages of testing, often in centralized, resource-rich environments.
+3. **A free signal is thrown away.** When a CPU processes DNA, its hardware behaviour (cache misses, branch mispredictions, IPC) is measured by the PMU but normally ignored. Only the software output is used.
+4. **There is no lightweight first-look layer.** Researchers lack a fast, cheap computational check that can run at the edge before committing to deeper analysis.
+
+### How GENOVA addresses it
+
+| Problem | GENOVA's approach |
+|---------|-------------------|
+| Delay before an abnormality is noticed | A fast hardware-signature check that could act as a screening or triage layer |
+| Unused hardware information | Turns PMU counters into a **hardware feature vector** compared with a baseline |
+| Dependence on heavy infrastructure | Runs on a low-cost **Raspberry Pi** (edge computing) |
+| Unknown whether input changes affect the CPU measurably | Shows, with a controlled deterministic kernel, that **changing the genomic input changes CPU behaviour** |
+
+### What has been shown so far
+
+> In the controlled KRAS experiment, deliberately introduced sequence changes produced **measurable changes in the CPU's microarchitectural behaviour** under a deterministic workload.
+
+That is the proof of concept: a genomic change can be seen as a hardware signal.
+
+### What is not solved yet
+
+- It does **not** diagnose cancer, and no cache-miss value "means cancer".
+- It has **not** yet been tested on real tumour and normal datasets. That is the next step.
+- Whether the hardware signature adds information beyond a plain software comparison is still an open research question.
+
+---
+
 ## 💡 The Idea
 
 Instead of treating the CPU as *just a machine that processes DNA*, GENOVA observes **how the CPU behaves while processing DNA**.
@@ -54,9 +87,8 @@ Instead of treating the CPU as *just a machine that processes DNA*, GENOVA obser
 1. Genomic data is passed through a **controlled, deterministic genomic-processing kernel** written in C.
 2. The workload runs on a **Raspberry Pi CPU** (pinned to a single core).
 3. The CPU's **Performance Monitoring Unit (PMU)** measures low-level hardware behaviour:
-   cache misses · branch mispredictions · instructions · CPU cycles · IPC **(PMU SIGNATURE)**
-4. These measurements become a **hardware feature**, compared against a **reference baseline**.
-5. **Detecting Cancer Associated DNA Processing Patterns Through CPU Hardware Signatures**
+   cache misses · branch mispredictions · instructions · CPU cycles · IPC
+4. These measurements become a **hardware feature vector**, compared against a **reference baseline**.
 
 In our controlled **KRAS** experiment we start from a reference sequence and deliberately introduce controlled sequence changes. As the input changes, the CPU's **microarchitectural behaviour changes with it**.
 
@@ -66,7 +98,7 @@ In our controlled **KRAS** experiment we start from a reference sequence and del
 ---
 
 ## 🔄 Project Workflow
- 
+
 ```text
 +---------------------------+
 |  1. GENOMIC INPUT         |
@@ -82,7 +114,7 @@ In our controlled **KRAS** experiment we start from a reference sequence and del
               v
 +---------------------------+
 |  3. STREAM OVER TCP       |
-|  send_dna.py -> port 9999 |
+|  send*.py -> port 9999    |
 +-------------+-------------+
               |
               v
@@ -127,32 +159,32 @@ In our controlled **KRAS** experiment we start from a reference sequence and del
 
 | # | Stage | What happens |
 |---|-------|--------------|
-| 1 | **Prepare** | Build reference & sample sequences (`make_kras_mut.py`, `make_classes.py`) → `.bin` files |
-| 2 | **Stream** | `send_dna.py` sends reference + sample chunk pairs to the Pi over TCP |
-| 3 | **Process** | `genova_pi.c` runs a pairwise ref-vs-sample comparator on core 2 |
+| 1 | **Prepare** | Build reference and sample sequences (`makekras.py`, `maketp53.py`, `make_classes.py`) and save as `.bin` files |
+| 2 | **Stream** | `sendkras.py` / `sendtp53.py` send reference + sample chunk pairs to the Pi over TCP |
+| 3 | **Process** | `genova_pi.c` runs a pairwise reference-vs-sample comparator on core 2 |
 | 4 | **Measure** | PMU counters are enabled for the whole session and read at the end |
-| 5 | **Featurize** | Raw counts → normalized features (IPC, misses per 1000 bases, mismatch %) |
-| 6 | **Compare** | Feature vector vs. baseline → deviation signature |
+| 5 | **Featurize** | Raw counts become normalized features (IPC, misses per 1000 bases, mismatch %) |
+| 6 | **Compare** | Feature vector is compared against the baseline to get a deviation signature |
 
 ---
 
 ## 🏗️ System Architecture
- 
+
 ```text
 +====================================================================+
 |  HOST MACHINE  (Sender)                                            |
 |                                                                    |
-|   kras_ref.fasta                                                   |
+|   kras_ref.fasta / tp53_RefSeqGene.fasta                           |
 |        |                                                           |
 |        v                                                           |
-|   make_kras_mut.py / make_classes.py                               |
+|   makekras.py / maketp53.py / make_classes.py                      |
 |        |                                                           |
 |        v                                                           |
 |   .bin datasets                                                    |
-|   (reference, mut0.0001 ... mut0.1, low / medium / high)           |
+|   (reference + mutation levels 0.0005 ... 25.2 %)                  |
 |        |                                                           |
 |        v                                                           |
-|   send_dna.py   (chunked TCP client)                               |
+|   sendkras.py / sendtp53.py   (chunked TCP client)                 |
 +========================================+===========================+
                                          |
                                          |  TCP port 9999
@@ -196,9 +228,9 @@ In our controlled **KRAS** experiment we start from a reference sequence and del
         OUTPUT LINE:
         bases, mismatch, cm, bm, ic, cy, ipc, cm_per_kb, bm_per_kb
 ```
- 
+
 ### Layered view
- 
+
 ```text
 +--------------------------------------------------------------+
 |  Application | Genomic comparator + feature extraction       |
@@ -210,58 +242,90 @@ In our controlled **KRAS** experiment we start from a reference sequence and del
 |  Hardware    | ARM CPU core 2, caches, branch predictor, PMU |
 +--------------------------------------------------------------+
 ```
- 
----
- 
-## 📁 Project Architecture (Repository)
- 
-```
-genova/
-├── genova_pi.c            # ⚙️  Deterministic kernel + PMU telemetry (runs on Pi)
-├── send_dna.py            # 📡  Sender: streams ref/sample pairs over TCP
-├── make_kras_mut.py       # 🧪  Generates KRAS mutation-rate datasets
-├── make_classes.py        # 🧪  Generates low / medium / high classes
-├── kras_ref.fasta         # 🧬  KRAS reference sequence (FASTA)
-├── kras_reference.bin     # 🧬  Encoded reference (0..3 per base)
-│
-├── kras_mut0.0001.bin     # Mutation sweep (percent values)
-├── kras_mut0.001.bin
-├── kras_mut0.005.bin
-├── kras_mut0.01.bin
-├── kras_mut0.05.bin
-├── kras_mut0.1.bin
-│
-├── kras_low.bin           # Class datasets
-├── kras_medium.bin
-├── kras_high.bin
-└── README.md
-```
- 
+
 ---
 
 ## 📁 Project Architecture (Repository)
 
-```
-genova/
-├── genova_pi.c            # ⚙️  Deterministic kernel + PMU telemetry (runs on Pi)
-├── send_dna.py            # 📡  Sender: streams ref/sample pairs over TCP
-├── make_kras_mut.py       # 🧪  Generates KRAS mutation-rate datasets
-├── make_classes.py        # 🧪  Generates low / medium / high classes
-├── kras_ref.fasta         # 🧬  KRAS reference sequence (FASTA)
-├── kras_reference.bin     # 🧬  Encoded reference (0..3 per base)
+GENOVA is organised **one folder per gene**. Each gene folder has its own reference sequence, dataset generator, sender script, and a `testdata/` folder of controlled mutation levels. The same kernel and pipeline are reused for every gene.
+
+```text
+.
+├── genova_pi.c                 # Deterministic kernel + PMU telemetry (runs on the Pi)
 │
-├── kras_mut0.0001.bin     # Mutation sweep (percent values)
-├── kras_mut0.001.bin
-├── kras_mut0.005.bin
-├── kras_mut0.01.bin
-├── kras_mut0.05.bin
-├── kras_mut0.1.bin
+├── kras/                       # ---- Gene 1: KRAS ----
+│   ├── kras_ref.fasta          # KRAS reference sequence (FASTA)
+│   ├── kras_reference.bin      # Encoded reference (0..3 per base)
+│   ├── makekras.py             # Generates mutated KRAS datasets
+│   ├── sendkras.py             # Streams KRAS data to the Pi over TCP
+│   ├── send.sh                 # Helper script for sending datasets
+│   └── testdata/               # Controlled mutation levels (percent)
+│       ├── krasmut0.0005.bin
+│       ├── krasmut0.008.bin
+│       ├── krasmut0.049.bin
+│       ├── krasmut0.12.bin
+│       ├── krasmut0.49.bin
+│       ├── krasmut0.67.bin
+│       ├── krasmut0.9.bin
+│       ├── krasmut1.1.bin
+│       ├── krasmut4.9.bin
+│       ├── krasmut5.1.bin
+│       ├── krasmut14.9.bin
+│       ├── krasmut15.1.bin
+│       ├── krasmut24.99.bin
+│       ├── krasmut25.bin
+│       └── krasmut25.2.bin
 │
-├── kras_low.bin           # Class datasets
-├── kras_medium.bin
-├── kras_high.bin
+├── tp53/                       # ---- Gene 2: TP53 ----
+│   ├── tp53_RefSeqGene.fasta   # TP53 RefSeqGene reference (FASTA)
+│   ├── tp53_reference.bin      # Encoded reference (0..3 per base)
+│   ├── maketp53.py             # Generates mutated TP53 datasets
+│   ├── make_classes.py         # Generates class-based datasets
+│   ├── sendtp53.py             # Streams TP53 data to the Pi over TCP
+│   ├── send.sh                 # Helper script for sending datasets
+│   └── testdata/               # Controlled mutation levels (percent)
+│       ├── tp53mut0.0005.bin
+│       ├── tp53mut0.008.bin
+│       ├── tp53mut0.049.bin
+│       ├── tp53mut0.12.bin
+│       ├── tp53mut0.49.bin
+│       ├── tp53mut0.67.bin
+│       ├── tp53mut0.9.bin
+│       ├── tp53mut1.1.bin
+│       ├── tp53mut4.9.bin
+│       ├── tp53mut5.1.bin
+│       ├── tp53mut14.9.bin
+│       ├── tp53mut15.1.bin
+│       ├── tp53mut24.99.bin
+│       └── tp53mut25.2.bin
+│
 └── README.md
 ```
+
+### Folder roles
+
+| Item | Role |
+|------|------|
+| `*_ref.fasta` / `*_RefSeqGene.fasta` | Source reference sequence for the gene |
+| `*_reference.bin` | Reference encoded as one byte per base (A,C,G,T → 0..3) |
+| `make*.py` | Builds the mutated sample files with controlled mutation rates |
+| `send*.py` | Sends reference + sample chunks to the Pi (TCP, port 9999) |
+| `send.sh` | Helper script for sending datasets |
+| `testdata/` | One `.bin` file per mutation level, named `<gene>mut<percent>.bin` |
+
+### Mutation levels in `testdata/`
+
+The sweep covers a wide range, from very rare to very frequent changes:
+
+| Band | Mutation rates (%) |
+|------|--------------------|
+| **Ultra-low** | 0.0005, 0.008, 0.049 |
+| **Low** | 0.12, 0.49, 0.67, 0.9 |
+| **Moderate** | 1.1, 4.9, 5.1 |
+| **High** | 14.9, 15.1 |
+| **Very high** | 24.99, 25, 25.2 (KRAS only for 25) |
+
+The pairs (4.9 / 5.1), (14.9 / 15.1) and (24.99 / 25 / 25.2) sit just below and just above round thresholds, which makes them useful for checking whether the hardware signature changes sharply near a boundary.
 
 ---
 
@@ -433,8 +497,9 @@ python3 send_dna.py <PI_IP> mut0.01
 # Worst case
 python3 send_dna.py <PI_IP> allA
 
-# KRAS dataset file
-python3 send_dna.py <PI_IP> kras_mut0.01.bin
+# Gene datasets (see the kras/ and tp53/ folders for the exact usage of each sender)
+cd kras && python3 sendkras.py <PI_IP> testdata/krasmut0.49.bin
+cd tp53 && python3 sendtp53.py <PI_IP> testdata/tp53mut0.49.bin
 ```
 
 ### 3. Read the signature
@@ -443,29 +508,40 @@ The Pi prints one summary line when the stream ends. Restart `genova_pi` before 
 
 ---
 
-## 🧪 Experiment: Controlled KRAS Mutation Sweep
+## 🧪 Experiment: Controlled Mutation Sweep (KRAS and TP53)
 
-| Dataset | Mutation level |
-|---------|----------------|
-| `kras_reference.bin` | Baseline (0 %) |
-| `kras_mut0.0001.bin` | 0.0001 % |
-| `kras_mut0.001.bin` | 0.001 % |
-| `kras_mut0.005.bin` | 0.005 % |
-| `kras_mut0.01.bin` | 0.01 % |
-| `kras_mut0.05.bin` | 0.05 % |
-| `kras_mut0.1.bin` | 0.1 % |
-| `kras_low / medium / high.bin` | Class-based datasets |
+The same pipeline is run on two genes, **KRAS** and **TP53**, each with 14 to 15 controlled mutation levels from 0.0005 % up to about 25 %.
 
-**Procedure:** run each dataset through the identical pipeline → record feature vector → plot features vs. mutation rate → compare to baseline. Repeat runs for variance estimates.
+| Gene | Reference | Test files | Mutation range |
+|------|-----------|------------|----------------|
+| **KRAS** | `kras/kras_reference.bin` | `kras/testdata/krasmut*.bin` (15 files) | 0.0005 % → 25.2 % |
+| **TP53** | `tp53/tp53_reference.bin` | `tp53/testdata/tp53mut*.bin` (14 files) | 0.0005 % → 25.2 % |
 
-```mermaid
-flowchart LR
-    R[Reference KRAS] --> M[Introduce controlled<br/>substitutions]
-    M --> S[Run through GENOVA]
-    S --> F[Feature vector per rate]
-    F --> P[Plot: feature vs mutation rate]
-    P --> C[Does the CPU signature<br/>track the input change?]
+**Procedure**
+
+```text
+1. Pick a gene (kras or tp53)
+        |
+        v
+2. Send the reference against itself  ->  baseline signature (0 % mutation)
+        |
+        v
+3. For each file in testdata/ (low -> high mutation rate):
+   send reference + mutated sample through GENOVA
+        |
+        v
+4. Record the feature vector for each run
+   (IPC, cm_per_kb, bm_per_kb, mismatch %)
+        |
+        v
+5. Plot features vs. mutation rate and compare with the baseline
+        |
+        v
+6. Does the CPU signature track the input change?
+   Is the trend consistent across both genes?
 ```
+
+Repeat each run several times to estimate run-to-run variance before drawing conclusions.
 
 ---
 
@@ -487,7 +563,7 @@ flowchart LR
 
 - [x] Deterministic C kernel with PMU telemetry on Raspberry Pi
 - [x] TCP streaming pipeline (host → edge)
-- [x] Controlled KRAS mutation sweep (0.0001 % → 0.1 %)
+- [x] Controlled mutation sweep on **KRAS** and **TP53** (0.0005 % → ~25 %)
 - [ ] Repeated runs with statistics (mean, σ, confidence intervals)
 - [ ] Expanded PMU feature set (L1D, LLC, dTLB, stalled cycles)
 - [ ] Real **tumour vs. normal** genomic datasets through the same pipeline
